@@ -10,7 +10,7 @@ from swebench.harness.constants import KEY_INSTANCE_ID, KEY_PREDICTION, KEY_MODE
     SWEbenchInstance
 from swebench.harness.docker_utils import clean_images, list_images
 from swebench.harness.reporting import make_run_report
-from swebench.harness.run_evaluation import run_instances
+from swebench.harness.run_evaluation import run_instances, build_env_images
 
 
 TIMEOUT = 3_600  # 1 hr should be enough to build images & run tests
@@ -82,6 +82,15 @@ def run_validation(
     if not dataset:
         print("No instances to run.")
     else:
+        build_env_images(
+            client,
+            dataset,
+            force_rebuild,
+            max_workers,
+            namespace,
+            instance_image_tag,
+            env_image_tag,
+        )
         run_instances(
             predictions,
             dataset,
@@ -120,7 +129,7 @@ def main(datapoint_path: str):
         KEY_PREDICTION: datapoint["patch"],
         KEY_MODEL: MODEL_NAME,
     }
-    dataset = [datapoint]
+    dataset = [SWEbenchInstance(**datapoint)]
     ts = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
     run_id = f"run_{ts}"
 
