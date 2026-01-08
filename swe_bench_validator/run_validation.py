@@ -1,17 +1,36 @@
 import datetime
 import json
 import platform
+import docker
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from pprint import pprint
 
-import docker
-from swebench.harness.constants import KEY_INSTANCE_ID, KEY_PREDICTION, KEY_MODEL, SWEbenchInstance
+from swebench.harness.constants import KEY_INSTANCE_ID, KEY_PREDICTION, KEY_MODEL, RUN_EVALUATION_LOG_DIR, LOG_REPORT, \
+    SWEbenchInstance
 from swebench.harness.docker_utils import clean_images, list_images
 from swebench.harness.reporting import make_run_report
 from swebench.harness.run_evaluation import run_instances
 
-if platform.system() == "Windows":
+
+TIMEOUT = 3_600  # 1 hr should be enough to build images & run tests
+MAX_WORKERS = 1
+CLEAN = False
+CACHE_LEVEL = "env"
+OPEN_FILE_LIMIT = 4096
+MODEL_NAME = "shmold"
+REQUIRED_SWEBENCH_DATAPOINT_FIELDS: set[str] = {
+    "instance_id",
+    "repo",
+    "base_commit",
+    "problem_statement",
+    "patch",
+    "test_patch",
+    "environment_setup_commit",
+    "FAIL_TO_PASS",
+    "PASS_TO_PASS",
+}
+
+if platform.system() == "Windows":  # A monkey-patch to make it work under Windows
     from pathlib import Path
 
     _real_write_text = Path.write_text
@@ -36,6 +55,7 @@ def run_validation(
         dataset: [SWEbenchInstance],
         predictions: dict,
         max_workers: int,
+        run_id: str,
         cache_level: str,
         clean: bool,
         open_file_limit: int,
@@ -45,8 +65,6 @@ def run_validation(
         report_dir: str = ".",
 ):
     force_rebuild, rewrite_reports, modal, namespace = False, False, False, None
-    ts = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
-    run_id = f"run_{ts}"
 
     # set open file limit
     assert len(run_id) > 0, "Run ID must be provided"
@@ -95,24 +113,39 @@ def run_validation(
 
 def main(datapoint_path: str):
     datapoint = load_datapoint(datapoint_path)
+    if REQUIRED_SWEBENCH_DATAPOINT_FIELDS - datapoint.keys():
+        print(f"Datapoint fields are missing: {REQUIRED_SWEBENCH_DATAPOINT_FIELDS - datapoint.keys()}")
+        return -1
     prediction = {
         KEY_INSTANCE_ID: datapoint["instance_id"],
         KEY_PREDICTION: datapoint["patch"],
-        KEY_MODEL: "shmold",  # TODO: decent model name
+        KEY_MODEL: MODEL_NAME,
     }
     dataset = [datapoint]
+    ts = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+    run_id = f"run_{ts}"
 
-    run_report = run_validation(
+    run_report_path = run_validation(
         dataset=dataset,
-        max_workers=8,
-        cache_level="",
-        clean=False,
-        open_file_limit=1700,
-        timeout=1770,
-        predictions={prediction[KEY_INSTANCE_ID]: prediction, }
+        max_workers=MAX_WORKERS,
+        run_id=run_id,
+        cache_level=CACHE_LEVEL,
+        clean=CLEAN,
+        open_file_limit=OPEN_FILE_LIMIT,
+        timeout=TIMEOUT,
+        predictions={prediction[KEY_INSTANCE_ID]: prediction, },
     )
-    pprint(run_report)
-    return
+    with open(run_report_path, "r") as f:
+        run_report = json.load(f)
+        # Resolved means f2p & p&p are both 100% success, see swebench.harness.gradin.get_resolution_status
+        num_passed = run_report["resolved_instances"]
+        if num_passed == 0:
+            print(
+                f"Not all tests in FAIL_TO_PASS and PASS_TO_PASS passed, "
+                f"see {RUN_EVALUATION_LOG_DIR / run_id / MODEL_NAME / prediction[KEY_INSTANCE_ID] / LOG_REPORT}"
+            )
+            return -1
+    return 0
 
 
 pass
@@ -122,5 +155,12 @@ if __name__ == "__main__":
         description="Run SWE-bench data point validation for the given data points.",
         formatter_class=ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument(
+        "-p",
+        "--datapoint_path",
+        type=str,
+        help="Datapoint path",
+        required=True,
+    )
     args = parser.parse_args()
-    main(**vars(args), datapoint_path='./data_points/astropy__astropy-11693.json')
+    exit(main(**vars(args)))
