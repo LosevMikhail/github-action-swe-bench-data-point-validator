@@ -4,6 +4,7 @@ import platform
 import docker
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+from pathlib import Path
 
 from swebench.harness.constants import KEY_INSTANCE_ID, KEY_PREDICTION, KEY_MODEL, RUN_EVALUATION_LOG_DIR, LOG_REPORT, \
     SWEbenchInstance
@@ -31,8 +32,6 @@ REQUIRED_SWEBENCH_DATAPOINT_FIELDS: set[str] = {
 }
 
 if platform.system() == "Windows":  # A monkey-patch to make it work under Windows
-    from pathlib import Path
-
     _real_write_text = Path.write_text
 
 
