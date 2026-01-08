@@ -1,1 +1,3 @@
-# github-action-swe-bench-data-point-validator
+# Brief explanation of the approach and design decisions
+
+The validation is implemented as a script using SWE-bench library. A datapoint path is received through CLI-interface, the datapoint is then loaded and converted to SWE-bench prediction format and fed to evaluation function (ofc after creating images needed for evaluation). The evaluation produces a report that is then read and used to determine whether all f2p and p2p tests passed. GitHub actions workflow simply wraps it and makes sure only affected files are passed to the validator. These design is used in order to keep the validation as simple as possible.
