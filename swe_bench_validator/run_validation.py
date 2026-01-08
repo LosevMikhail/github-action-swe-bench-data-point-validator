@@ -1,26 +1,30 @@
+import datetime
 import json
 import platform
-import time
-
-from swebench.harness.constants import SWEbenchInstance
-
-if platform.system() == "Linux":
-    import resource
 
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-from pathlib import Path
 from pprint import pprint
 
 import docker
-from swebench import KEY_INSTANCE_ID, run_evaluation, list_images, build_env_images, KEY_PREDICTION, KEY_MODEL
-from swebench.harness.docker_utils import clean_images
-from swebench.harness.modal_eval import validate_modal_credentials, run_instances_modal
+from swebench.harness.constants import KEY_INSTANCE_ID, KEY_PREDICTION, KEY_MODEL, SWEbenchInstance
+from swebench.harness.docker_utils import clean_images, list_images
 from swebench.harness.reporting import make_run_report
-from swebench.harness.run_evaluation import get_dataset_from_preds, run_instances
-from swebench.harness.utils import load_swebench_dataset
+from swebench.harness.run_evaluation import run_instances
+
+if platform.system() == "Windows":
+    from pathlib import Path
+
+    _real_write_text = Path.write_text
 
 
-# import from swebench.harness import run_evaluation
+    def write_text_lf(self, data, encoding=None, errors=None, newline=None):
+        # Force LF when caller didn't explicitly request something else
+        if newline is None:
+            newline = "\n"
+        return _real_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
+
+
+    Path.write_text = write_text_lf
 
 
 def load_datapoint(datapoint_path: str):
@@ -29,7 +33,7 @@ def load_datapoint(datapoint_path: str):
 
 
 def run_validation(
-        full_dataset: [SWEbenchInstance],
+        dataset: [SWEbenchInstance],
         predictions: dict,
         max_workers: int,
         cache_level: str,
@@ -41,8 +45,8 @@ def run_validation(
         report_dir: str = ".",
 ):
     force_rebuild, rewrite_reports, modal, namespace = False, False, False, None
-    run_id = f"run_{str(time.time())}"
-    # run_id = f"run_{str(datetime.now().isoformat())}"
+    ts = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+    run_id = f"run_{ts}"
 
     # set open file limit
     assert len(run_id) > 0, "Run ID must be provided"
@@ -51,10 +55,9 @@ def run_validation(
         if not report_dir.exists():
             report_dir.mkdir(parents=True)
 
-    dataset = full_dataset
-
     # run instances locally
     if platform.system() == "Linux":
+        import resource
         resource.setrlimit(resource.RLIMIT_NOFILE, (open_file_limit, open_file_limit))
     client = docker.from_env()
 
@@ -62,17 +65,6 @@ def run_validation(
     if not dataset:
         print("No instances to run.")
     else:
-        # build environment images + run instances
-        if namespace is None and not rewrite_reports:
-            build_env_images(
-                client,
-                dataset,
-                force_rebuild,
-                max_workers,
-                namespace,
-                instance_image_tag,
-                env_image_tag,
-            )
         run_instances(
             predictions,
             dataset,
@@ -92,7 +84,7 @@ def run_validation(
     clean_images(client, existing_images, cache_level, clean)
     return make_run_report(
         predictions,
-        full_dataset,
+        dataset,
         run_id,
         client,
         namespace,
@@ -106,12 +98,12 @@ def main(datapoint_path: str):
     prediction = {
         KEY_INSTANCE_ID: datapoint["instance_id"],
         KEY_PREDICTION: datapoint["patch"],
-        KEY_MODEL: "gold",  # TODO: decent model name
+        KEY_MODEL: "shmold",  # TODO: decent model name
     }
     dataset = [datapoint]
 
     run_report = run_validation(
-        full_dataset=dataset,
+        dataset=dataset,
         max_workers=8,
         cache_level="",
         clean=False,
@@ -121,24 +113,6 @@ def main(datapoint_path: str):
     )
     pprint(run_report)
     return
-
-    # run_report = run_evaluation(
-    #     dataset_name=datapoint['_download_metadata']['dataset_name'],
-    #     split=datapoint['_download_metadata']['split'],
-    #     instance_ids=[datapoint['instance_id']],
-    #     predictions_path='gold',
-    #     max_workers=8,
-    #     force_rebuild=False,
-    #     cache_level="",
-    #     clean=False,
-    #     open_file_limit=1700,
-    #     run_id="111",
-    #     timeout=1770,
-    #     namespace=None,
-    #     rewrite_reports=False,
-    #     modal=False
-    # )
-    # pprint(run_report)
 
 
 pass
